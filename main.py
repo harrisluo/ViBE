@@ -1,12 +1,34 @@
+'''
+Basic pitch detection algorithm:
+    - sample audio
+    - perform fft
+    - round to nearest standard pitch value
+'''
+
+# Math dependencies
+from math import log2
+from scipy.fftpack import fft
+import numpy as np
+
+# Audio processing
 import pyaudio
 import struct
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from itertools import count
-from scipy.fftpack import fft
 
-CHUNK = 1024 * 2            # samples per frame
+# Pitch standards
+A4 = 440
+C0 = A4 * pow(2, -4.75)
+note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+def pitch(freq):
+    if freq <= 0:
+        return "NULL"
+    h = round(12*log2(freq/C0))
+    octave = h // 12
+    n = h % 12
+    return note_names[n] + str(octave)
+
+# pyaudio constants
+CHUNK = 1024 * 4            # samples per frame
 FORMAT = pyaudio.paInt16    # 16 bit integer audio format
 CHANNELS = 1                # single mic channel
 RATE = 48000                # 48 kHz bitrate
@@ -20,41 +42,31 @@ stream = p.open (
     channels=CHANNELS,
     rate=RATE,
     input=True,
-    output=False,
+    output=True,
     frames_per_buffer=CHUNK
 )
 
-# matplotlib figure and axes initialization
-fig, ax = plt.subplots()
-x_fft = np.linspace(0, RATE, CHUNK)    # number of frequencies
-line, = ax.semilogx(x_fft, np.random.rand(CHUNK), '-', lw=2)   # initialize line object
-ax.set_xlim(20, RATE / 2)
+# loop:
+#   read audio stream
+#   process and format data
+#   find predominant frequency
+#   print standard pitch equivalent
 
-# index for plot animation
-i = count()
+while True:
+    x = np.arange(0, 2 * CHUNK, 2)
+    y = np.linspace(0, RATE // 2, CHUNK // 2)
 
-def animate(i):
-    # read binary data from audio stream
-    data = stream.read(CHUNK, exception_on_overflow = False)
+    chunk_data = stream.read(CHUNK)
+    chunk_data = struct.unpack(str(2 * CHUNK) + 'B', chunk_data)
+    chunk_data = np.array(chunk_data, dtype='b')[::2] + 128
 
-    #audio data being plotted as signed int:
-    #data_int = struct.unpack(str(2 * CHUNK) + 'B', data)
-    
-    #convert to unsigned
-    f = lambda x: x + 128 if x < 128 else x - 128
-    data_int = np.array(struct.unpack(str(2 * CHUNK) + 'B', data), dtype = 'b')[::2]
-    data_int = np.array([f(x) for x in data_int])
-    y_fft = fft(data_int)
+    fft_data = fft(np.array(chunk_data, dtype='int8') - 128)
+    fft_data = np.abs(fft_data[0:int(CHUNK / 2)]) * 2 / (128 * CHUNK)
+    fft_data = fft_data[1:]  # slice off undefined [0] index of fft
 
-    #plt.cla()
-    #plt.semilogx(x_fft, np.abs(y_fft[0:CHUNK]) * 2 / 256)
-    line.set_ydata(np.abs(y_fft[0:CHUNK]) / 256)
-    ax = plt.gca()
-    ax.set_ylim(0, 255)
-    #ax.set_xlim(20, RATE / 2)
+    dom_freq_index = np.where(fft_data == np.amax(fft_data))[0][0]
+    print("Freq: {:>8.2f} | Amp: {:>6.2f} | Note: {:<4s}".format(y[dom_freq_index],
+                                                fft_data[dom_freq_index],
+                                                pitch(y[dom_freq_index])))
 
-ani = FuncAnimation(plt.gcf(), animate, 1)
-#animate(0)
-#input("Press any key...")
-plt.show()
 
